@@ -1,0 +1,1 @@
+# Leitura/mapeamento de tokens
