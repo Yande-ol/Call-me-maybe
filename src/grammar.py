@@ -1,6 +1,7 @@
 """Grammar state machine for constrained JSON tool call generation."""
 
 from enum import Enum, auto
+import re
 from typing import Dict, List, Optional, Set
 from src.models import FunctionDefinition
 
@@ -59,6 +60,23 @@ class JSONGrammar:
             ].type
         return None
 
+    def is_valid_number_prefix(self, value: str) -> bool:
+        """Returns whether value can be extended into a valid JSON number."""
+        pattern = r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]*)?(?:[eE][+-]?[0-9]*)?"
+        if self.current_param_type() == "integer":
+            pattern = r"-?(?:0|[1-9][0-9]*)"
+        return (
+            value in ("", "-")
+            or re.fullmatch(pattern, value) is not None
+        )
+
+    def is_complete_number(self, value: str) -> bool:
+        """Returns whether value is a complete valid JSON number."""
+        pattern = r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"
+        if self.current_param_type() == "integer":
+            pattern = r"-?(?:0|[1-9][0-9]*)"
+        return re.fullmatch(pattern, value) is not None
+
     def get_allowed_literals_or_chars(self) -> Set[str]:
         """Returns the set of strings/characters allowed at current state."""
         partial = self.buffer[self.state_start_idx:]
@@ -100,16 +118,14 @@ class JSONGrammar:
                 return allowed_bools
 
             if ptype in ("number", "integer"):
-                chars = set("0123456789")
-                if not partial:
-                    chars.add("-")
-                else:
-                    if "." not in partial and ptype == "number":
-                        chars.add(".")
-                    if self.remaining_args:
-                        chars.add(",")
-                    else:
-                        chars.add("}")
+                chars = set("0123456789.-eE+")
+                chars = {
+                    char
+                    for char in chars
+                    if self.is_valid_number_prefix(partial + char)
+                }
+                if self.is_complete_number(partial):
+                    chars.update({","} if self.remaining_args else {"}"})
                 return chars
 
             if ptype == "string":
@@ -190,12 +206,16 @@ class JSONGrammar:
                     self.current_arg_name = None
                     self._transition_to(GrammarState.NEXT_OR_CLOSE_ARGS)
             else:
-                if text.endswith(","):
+                if text.endswith(",") and self.is_complete_number(
+                    partial[:-1]
+                ):
                     self.current_arg_name = None
                     if not self.buffer.endswith(", "):
                         self.buffer = self.buffer[:-1] + ", "
                     self._transition_to(GrammarState.ARG_KEY)
-                elif text.endswith("}"):
+                elif text.endswith("}") and self.is_complete_number(
+                    partial[:-1]
+                ):
                     self.current_arg_name = None
                     self._transition_to(GrammarState.CLOSE_JSON)
 
