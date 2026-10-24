@@ -76,15 +76,23 @@ def main() -> None:
     engine = ConstrainedEngine(model=model, vocab_manager=vocab_mgr)
     results: List[ResultEntry] = []
 
-    for test in tests:
-        call: ToolCall = engine.generate(
-            user_prompt=test.prompt, function_definitions=tools
-        )
-        entry = ResultEntry(
-            prompt=test.prompt,
-            name=call.name,
-            parameters=call.parameters,
-        )
+    for index, test in enumerate(tests, start=1):
+        try:
+            call: ToolCall = engine.generate(
+                user_prompt=test.prompt, function_definitions=tools
+            )
+            entry = ResultEntry(
+                prompt=test.prompt,
+                name=call.name,
+                parameters=call.parameters,
+            )
+        except Exception as err:
+            sys.stderr.write(
+                f"Error processing prompt {index} ({test.prompt!r}): "
+                f"{err}\n"
+            )
+            continue
+
         results.append(entry)
         print(entry.model_dump_json(indent=2))
 
