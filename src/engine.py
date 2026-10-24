@@ -128,9 +128,13 @@ class ConstrainedEngine:
             raw_logits = self.model.get_logits_from_input_ids(input_ids)
             allowed_ids = self._get_allowed_ids(grammar, allowed_literals)
 
-            logits_arr = np.array(raw_logits, dtype=np.float32)
             if not allowed_ids:
-                allowed_ids = list(range(len(logits_arr)))
+                raise RuntimeError(
+                    "No valid tokens available for grammar state "
+                    f"{grammar.state.name}."
+                )
+
+            logits_arr = np.array(raw_logits, dtype=np.float32)
 
             mask = np.full(len(logits_arr), -np.inf, dtype=np.float32)
             mask[allowed_ids] = logits_arr[allowed_ids]
