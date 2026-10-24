@@ -1,7 +1,7 @@
 # Schemas Pydantic
 """Data models and schemas for Call-me-maybe."""
 
-from typing import Any, Dict, List, Literal, Union
+from typing import Any, Dict, Literal, Union
 from pydantic import BaseModel, Field, StrictFloat, StrictInt, StrictStr
 
 
@@ -21,7 +21,8 @@ class ReturnDefinition(BaseModel):
 
 
 class FunctionDefinition(BaseModel):
-    """Schema for function definitions loaded from functions_definition.json."""
+    """Schema for function definitions
+    loaded from functions_definition.json."""
 
     name: str
     description: str
