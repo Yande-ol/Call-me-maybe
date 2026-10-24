@@ -77,6 +77,46 @@ class JSONGrammar:
             pattern = r"-?(?:0|[1-9][0-9]*)"
         return re.fullmatch(pattern, value) is not None
 
+    @staticmethod
+    def _first_unescaped_quote(text: str) -> Optional[int]:
+        """Returns the index of the first quote not escaped by a backslash."""
+        backslashes = 0
+        for index, char in enumerate(text):
+            if char == "\\":
+                backslashes += 1
+            elif char == '"':
+                if backslashes % 2 == 0:
+                    return index
+                backslashes = 0
+            else:
+                backslashes = 0
+        return None
+
+    @staticmethod
+    def _escape_string_fragment(text: str) -> str:
+        """Escapes backslashes that do not start a valid JSON escape."""
+        escaped: List[str] = []
+        index = 0
+        while index < len(text):
+            char = text[index]
+            if char == "\\" and index + 1 < len(text):
+                next_char = text[index + 1]
+                if next_char == "u" and index + 5 < len(text):
+                    escaped.append(text[index:index + 6])
+                    index += 6
+                    continue
+                if next_char in '"\\/bfnrt':
+                    escaped.append(text[index:index + 2])
+                    index += 2
+                    continue
+                escaped.append("\\\\")
+            elif char == "\\":
+                escaped.append("\\\\")
+            else:
+                escaped.append(char)
+            index += 1
+        return "".join(escaped)
+
     def get_allowed_literals_or_chars(self) -> Set[str]:
         """Returns the set of strings/characters allowed at current state."""
         partial = self.buffer[self.state_start_idx:]
@@ -148,12 +188,12 @@ class JSONGrammar:
             and self.current_param_type() == "string"
             and self.in_string_value
         ):
-            if '"' in text:
-                q_idx = text.index('"')
-                content = text[:q_idx].replace("\\", "\\\\")
+            q_idx = self._first_unescaped_quote(text)
+            if q_idx is not None:
+                content = self._escape_string_fragment(text[:q_idx])
                 text = content + '"'
             else:
-                text = text.replace("\\", "\\\\")
+                text = self._escape_string_fragment(text)
 
         self.buffer += text
         partial = self.buffer[self.state_start_idx:]
