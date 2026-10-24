@@ -52,9 +52,16 @@ class ConstrainedEngine:
             if ptype == "string" and grammar.in_string_value:
                 return self.vocab.string_token_ids
             if ptype in ("number", "integer"):
-                ids = list(self.vocab.number_token_ids)
+                partial = grammar.buffer[grammar.state_start_idx:]
+                ids = [
+                    token_id
+                    for token_id in self.vocab.number_token_ids
+                    if grammar.is_valid_number_prefix(
+                        partial + self.vocab.id_to_token[token_id]
+                    )
+                ]
                 for ch in allowed_strings:
-                    if ch in ("-", ".", ",", "}"):
+                    if ch in ("-", ".", "e", "E", "+", ",", "}"):
                         if ch in self.vocab.token_to_id:
                             ids.append(self.vocab.token_to_id[ch])
                 return list(set(ids))
