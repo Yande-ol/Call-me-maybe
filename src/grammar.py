@@ -117,6 +117,8 @@ class JSONGrammar:
                     break
 
         elif self.state == GrammarState.AFTER_NAME:
+            if not self.selected_function:
+                return
             name = self.selected_function.name
             expected_prefix = f'{{"name": "{name}", "arguments": {{'
             if self.buffer.startswith(expected_prefix):
