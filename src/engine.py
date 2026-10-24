@@ -6,7 +6,7 @@ from typing import Any, List, Set
 import numpy as np
 
 from src.grammar import GrammarState, JSONGrammar
-from src.models import FunctionDefinition, ToolCall
+from src.models import FunctionDefinition, ToolCall, validate_tool_call
 from src.vocab import VocabManager
 
 
@@ -163,4 +163,6 @@ class ConstrainedEngine:
             else:
                 input_ids.append(next_token_id)
 
-        return ToolCall.model_validate_json(grammar.buffer.strip())
+        tool_call = ToolCall.model_validate_json(grammar.buffer.strip())
+        function_map = {fn.name: fn for fn in function_definitions}
+        return validate_tool_call(tool_call, function_map)
