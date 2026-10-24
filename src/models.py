@@ -56,3 +56,43 @@ class ResultEntry(BaseModel):
     prompt: str
     name: str
     parameters: Dict[str, ArgumentValue]
+
+
+def validate_tool_call(
+    tool_call: ToolCall,
+    function_definitions: Dict[str, FunctionDefinition],
+) -> ToolCall:
+    """Validates a tool call against its selected function definition."""
+    function = function_definitions.get(tool_call.name)
+    if function is None:
+        raise ValueError(f"Unknown function: {tool_call.name}")
+
+    expected_names = set(function.parameters)
+    actual_names = set(tool_call.parameters)
+    missing_names = expected_names - actual_names
+    extra_names = actual_names - expected_names
+    if missing_names:
+        raise ValueError(
+            f"Missing required parameters: {sorted(missing_names)}"
+        )
+    if extra_names:
+        raise ValueError(f"Unexpected parameters: {sorted(extra_names)}")
+
+    for name, definition in function.parameters.items():
+        value = tool_call.parameters[name]
+        valid_type = (
+            isinstance(value, str)
+            if definition.type == "string"
+            else isinstance(value, bool)
+            if definition.type == "boolean"
+            else isinstance(value, int) and not isinstance(value, bool)
+            if definition.type == "integer"
+            else isinstance(value, (int, float))
+            and not isinstance(value, bool)
+        )
+        if not valid_type:
+            raise TypeError(
+                f"Parameter '{name}' must have type '{definition.type}'."
+            )
+
+    return tool_call
