@@ -75,6 +75,7 @@ def main() -> None:
 
     engine = ConstrainedEngine(model=model, vocab_manager=vocab_mgr)
     results: List[ResultEntry] = []
+    errors: List[str] = []
 
     for index, test in enumerate(tests, start=1):
         try:
@@ -87,14 +88,20 @@ def main() -> None:
                 parameters=call.parameters,
             )
         except Exception as err:
-            sys.stderr.write(
-                f"Error processing prompt {index} ({test.prompt!r}): "
-                f"{err}\n"
+            errors.append(
+                f"prompt {index} ({test.prompt!r}): {err}"
             )
             continue
 
         results.append(entry)
         print(entry.model_dump_json(indent=2))
+
+    if errors:
+        details = "\n".join(f"- {error}" for error in errors)
+        raise RuntimeError(
+            "Generation failed for one or more prompts:\n"
+            f"{details}"
+        )
 
     out_file = Path(args.output)
     out_file.parent.mkdir(parents=True, exist_ok=True)
