@@ -1,4 +1,3 @@
-# Leitura/mapeamento de tokens
 """Vocabulary loader and token mapping utilities without AI frameworks."""
 
 import json
@@ -17,6 +16,10 @@ class VocabManager:
         Mapping from token ID to decoded clean string.
     string_token_ids: List[int]
         Precomputed token IDs valid inside JSON string values.
+    open_quote_token_ids: List[int]
+        Precomputed token IDs that open a JSON string ('"' or ' "').
+    empty_quote_token_ids: List[int]
+        Precomputed token IDs that represent an empty JSON string ('""').
     number_token_ids: List[int]
         Precomputed token IDs consisting purely of digits.
     """
@@ -26,6 +29,8 @@ class VocabManager:
         self.token_to_id: Dict[str, int] = {}
         self.id_to_token: Dict[int, str] = {}
         self.string_token_ids: List[int] = []
+        self.open_quote_token_ids: List[int] = []
+        self.empty_quote_token_ids: List[int] = []
         self.number_token_ids: List[int] = []
         self._load_vocab()
         self._precompute_token_sets()
@@ -60,7 +65,13 @@ class VocabManager:
 
     def _precompute_token_sets(self) -> None:
         """Precomputes valid token IDs for numbers and string contents."""
+        allowed_str_chars = set(
+            "abcdefghijklmnopqrstuvwxyz"
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "0123456789 _-./:?=!@#$%^&*()[]+\\'"
+        )
         digits = set("0123456789")
+        closing_suffixes = ('"', '",', '", ', '"}', '"}\n', '", \n')
 
         for tid, clean in self.id_to_token.items():
             if not clean:
@@ -68,40 +79,20 @@ class VocabManager:
             if all(c in digits for c in clean):
                 self.number_token_ids.append(tid)
 
-            if self._is_valid_string_token(clean):
+            if clean in ('"', ' "'):
+                self.open_quote_token_ids.append(tid)
+            elif clean in ('""', ' ""'):
+                self.empty_quote_token_ids.append(tid)
+
+            if all(c in allowed_str_chars for c in clean):
                 self.string_token_ids.append(tid)
-
-    @staticmethod
-    def _is_valid_string_token(token: str) -> bool:
-        """Checks whether a token can occur inside a JSON string value."""
-        if not token:
-            return False
-
-        index = 0
-        while index < len(token):
-            char = token[index]
-            if char == '"':
-                valid_suffixes = ('"', '",', '", ', '"}', '"}\n', '", \n')
-                return token[index:] in valid_suffixes
-            if ord(char) < 0x20:
-                return False
-            if char == "\\" and index + 1 < len(token):
-                next_char = token[index + 1]
-                if next_char == "u":
-                    if index + 5 >= len(token):
-                        return False
-                    hex_digits = token[index + 2:index + 6]
-                    if len(hex_digits) == 4 and all(
-                        digit in "0123456789abcdefABCDEF"
-                        for digit in hex_digits
-                    ):
-                        index += 6
-                        continue
-                if next_char in '"\\/bfnrt':
-                    index += 2
-                    continue
-            index += 1
-        return True
+            else:
+                for suffix in closing_suffixes:
+                    if clean.endswith(suffix):
+                        prefix = clean[: -len(suffix)]
+                        if all(c in allowed_str_chars for c in prefix):
+                            self.string_token_ids.append(tid)
+                            break
 
     @property
     def vocab_size(self) -> int:

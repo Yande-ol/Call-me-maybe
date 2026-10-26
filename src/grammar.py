@@ -235,8 +235,12 @@ class JSONGrammar:
                 return
 
             if ptype == "string":
-                if not self.in_string_value and text == '"':
-                    self.in_string_value = True
+                if not self.in_string_value:
+                    if text == '"':
+                        self.in_string_value = True
+                    elif text == '""':
+                        self.current_arg_name = None
+                        self._transition_to(GrammarState.NEXT_OR_CLOSE_ARGS)
                 elif self.in_string_value and text.endswith('"'):
                     self.in_string_value = False
                     self.current_arg_name = None

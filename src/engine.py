@@ -1,4 +1,3 @@
-# Lógica de Constrained Decoding
 """Inference engine with constrained decoding for deterministic tool calls."""
 
 import json
@@ -36,7 +35,19 @@ class ConstrainedEngine:
             "<|im_start|>system\n"
             "You are a helpful assistant that calls functions to solve tasks. "
             "Respond ONLY with a single JSON object containing the function "
-            '"name" and "parameters" to call.\n'
+            '"name" and "parameters" to call. Preserve every extracted value '
+            "exactly. A negative number must start with '-' immediately "
+            "before its digits; never omit that sign. Preserve decimal "
+            "points and string characters too. For example, if the user asks "
+            "to add -2 and 3.5, the numeric values must be -2 and 3.5, not "
+            "2 and 3.5. For regex requests, use simple patterns without "
+            "capturing groups () and preserve escapes such as \\d+ and \\s+ "
+            "exactly. When a prompt names a replacement character such as "
+            "asterisk, hash, or dash, output that single character itself "
+            "without spaces or repetition (e.g. '*' or '-'). When the "
+            "request says all vowels, include both lowercase and uppercase "
+            "vowels in the regular expression ([aeiouAEIOU]). Empty string "
+            'values must be represented as "".\n'
             f"Available tools:\n{tools_json}\n<|im_end|>\n"
             f"<|im_start|>user\n{user_prompt}\n<|im_end|>\n"
             "<|im_start|>assistant\n"
@@ -49,17 +60,39 @@ class ConstrainedEngine:
         """Maps allowed textual continuations to their token IDs."""
         if grammar.state == GrammarState.ARG_VALUE:
             ptype = grammar.current_param_type()
-            if ptype == "string" and grammar.in_string_value:
+            if ptype == "string":
+                if not grammar.in_string_value:
+                    return list(
+                        set(
+                            self.vocab.open_quote_token_ids
+                            + self.vocab.empty_quote_token_ids
+                        )
+                    )
                 return self.vocab.string_token_ids
             if ptype in ("number", "integer"):
                 partial = grammar.buffer[grammar.state_start_idx:]
-                ids = [
-                    token_id
-                    for token_id in self.vocab.number_token_ids
-                    if grammar.is_valid_number_prefix(
-                        partial + self.vocab.id_to_token[token_id]
-                    )
-                ]
+                ids: List[int] = []
+                for token_id in self.vocab.number_token_ids:
+                    tok = self.vocab.id_to_token[token_id]
+                    if grammar.is_valid_number_prefix(partial + tok):
+                        ids.append(token_id)
+                if not partial:
+                    for raw_tok in (
+                        "Ġ-",
+                        "-",
+                        "Ġ0",
+                        "Ġ1",
+                        "Ġ2",
+                        "Ġ3",
+                        "Ġ4",
+                        "Ġ5",
+                        "Ġ6",
+                        "Ġ7",
+                        "Ġ8",
+                        "Ġ9",
+                    ):
+                        if raw_tok in self.vocab.token_to_id:
+                            ids.append(self.vocab.token_to_id[raw_tok])
                 for ch in allowed_strings:
                     if ch in ("-", ".", "e", "E", "+", ",", "}"):
                         if ch in self.vocab.token_to_id:
@@ -122,17 +155,28 @@ class ConstrainedEngine:
                 input_ids.extend(token_ids)
                 continue
 
-            if (
-                grammar.state == GrammarState.ARG_VALUE
-                and not grammar.in_string_value
-                and grammar.current_param_type() == "string"
+            # Fronteira BPE limpa (sem espaço solto após ':') no 1º token de
+            # strings (para decidir entre ' "' e ' ""') e no 1º token de
+            # números (para decidir entre ' -' e dígitos).
+            partial = grammar.buffer[grammar.state_start_idx:]
+            if grammar.state == GrammarState.ARG_VALUE and (
+                (
+                    grammar.current_param_type() == "string"
+                    and not grammar.in_string_value
+                )
+                or (
+                    grammar.current_param_type() in ("number", "integer")
+                    and not partial
+                )
             ):
-                grammar.feed('"')
-                token_ids = self.model.encode('"').tolist()[0]
-                input_ids.extend(token_ids)
-                continue
+                bpe_prefix = full_text + grammar.buffer.rstrip(" ")
+                query_ids: List[int] = (
+                    self.model.encode(bpe_prefix).tolist()[0]
+                )
+            else:
+                query_ids = input_ids
 
-            raw_logits = self.model.get_logits_from_input_ids(input_ids)
+            raw_logits = self.model.get_logits_from_input_ids(query_ids)
             allowed_ids = self._get_allowed_ids(grammar, allowed_literals)
 
             if not allowed_ids:
@@ -142,14 +186,35 @@ class ConstrainedEngine:
                 )
 
             logits_arr = np.array(raw_logits, dtype=np.float32)
-
             mask = np.full(len(logits_arr), -np.inf, dtype=np.float32)
             mask[allowed_ids] = logits_arr[allowed_ids]
 
             next_token_id = int(np.argmax(mask))
+
+            if (
+                grammar.state == GrammarState.ARG_VALUE
+                and grammar.current_param_type() == "string"
+                and not grammar.in_string_value
+            ):
+                if next_token_id in self.vocab.empty_quote_token_ids:
+                    grammar.feed('""')
+                    token_ids = self.model.encode('""').tolist()[0]
+                    input_ids.extend(token_ids)
+                else:
+                    grammar.feed('"')
+                    token_ids = self.model.encode('"').tolist()[0]
+                    input_ids.extend(token_ids)
+                continue
+
             token_str = self.vocab.id_to_token.get(
                 next_token_id, self.model.decode([next_token_id])
             )
+            if (
+                grammar.state == GrammarState.ARG_VALUE
+                and grammar.current_param_type() in ("number", "integer")
+                and not partial
+            ):
+                token_str = token_str.lstrip(" ")
 
             prev_len = len(grammar.buffer)
             grammar.feed(token_str)
