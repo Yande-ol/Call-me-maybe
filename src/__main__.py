@@ -43,10 +43,20 @@ def load_tools(path: str) -> List[FunctionDefinition]:
     file_path = Path(path)
     if not file_path.exists():
         raise FileNotFoundError(f"Functions file not found: {path}")
-    with open(file_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Invalid JSON format in functions file '{path}': {exc}"
+        )
+
     if not isinstance(data, list):
         raise ValueError("Functions definition file must contain a JSON list.")
+    if not data:
+        raise ValueError("Functions definition list cannot be empty.")
+
     return [FunctionDefinition.model_validate(item) for item in data]
 
 
@@ -55,8 +65,13 @@ def load_tests(path: str) -> List[TestCase]:
     file_path = Path(path)
     if not file_path.exists():
         raise FileNotFoundError(f"Input test file not found: {path}")
-    with open(file_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON format in test file '{path}': {exc}")
+
     if not isinstance(data, list):
         raise ValueError("Input test file must contain a JSON list.")
     return [TestCase.model_validate(item) for item in data]
@@ -70,10 +85,16 @@ def main() -> None:
     tests: List[TestCase] = load_tests(args.input)
 
     model = Small_LLM_Model()
-    vocab_path = model.get_path_to_vocab_file()
-    vocab_mgr = VocabManager(vocab_path)
+    if hasattr(model, "get_path_to_vocab_file"):
+        vocab_path = model.get_path_to_vocab_file()
+    elif hasattr(model, "get_path_to_tokenizer_file"):
+        vocab_path = model.get_path_to_tokenizer_file()
+    else:
+        vocab_path = getattr(model, "vocab_path", "tokenizer.json")
 
+    vocab_mgr = VocabManager(vocab_path)
     engine = ConstrainedEngine(model=model, vocab_manager=vocab_mgr)
+
     results: List[ResultEntry] = []
     errors: List[str] = []
 
