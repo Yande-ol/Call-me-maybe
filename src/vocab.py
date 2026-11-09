@@ -65,11 +65,10 @@ class VocabManager:
 
     def _precompute_token_sets(self) -> None:
         """Precomputes valid token IDs for numbers and string contents."""
-        allowed_str_chars = set(
-            "abcdefghijklmnopqrstuvwxyz"
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            "0123456789 _-./:?=!@#$%^&*()[]+\\'"
-        )
+        allowed_str_chars = {
+            chr(codepoint) for codepoint in range(32, 127)
+        }
+        allowed_str_chars.update("\t\n\r")
         digits = set("0123456789")
         closing_suffixes = ('"', '",', '", ', '"}', '"}\n', '", \n')
 
