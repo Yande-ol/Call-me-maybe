@@ -241,7 +241,11 @@ class JSONGrammar:
                     elif text == '""':
                         self.current_arg_name = None
                         self._transition_to(GrammarState.NEXT_OR_CLOSE_ARGS)
-                elif self.in_string_value and text.endswith('"'):
+                elif (
+                    self.in_string_value
+                    and text.endswith('"')
+                    and self._first_unescaped_quote(text) is not None
+                ):
                     self.in_string_value = False
                     self.current_arg_name = None
                     self._transition_to(GrammarState.NEXT_OR_CLOSE_ARGS)
