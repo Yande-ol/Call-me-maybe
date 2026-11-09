@@ -42,11 +42,19 @@ class ConstrainedEngine:
             "to add -2 and 3.5, the numeric values must be -2 and 3.5, not "
             "2 and 3.5. For regex requests, use simple patterns without "
             "capturing groups () and preserve escapes such as \\d+ and \\s+ "
-            "exactly. When a prompt names a replacement character such as "
-            "asterisk, hash, or dash, output that single character itself "
-            "without spaces or repetition (e.g. '*' or '-'). When the "
-            "request says all vowels, include both lowercase and uppercase "
-            "vowels in the regular expression ([aeiouAEIOU]). Empty string "
+            "exactly. A request to match spaces or whitespace requires the "
+            "non-empty pattern \\s+ rather than an empty string. When a "
+            "prompt names a replacement character such as asterisk, hash, "
+            "dash, or dashes, output exactly one ASCII hyphen-minus character "
+            "for dashes: the JSON value is \"-\" (length 1), never \"--\". "
+            "Likewise, asterisks means the single character \"*\", never "
+            "\"**\". Do not repeat the replacement character or add spaces. "
+            "When the "
+            "request says all vowels, use a regex character class with the "
+            "literal brackets and both cases: [aeiouAEIOU]. If the "
+            "request says dashes, the replacement value must be exactly \"-\" "
+            "(one character); if it says asterisks, use exactly \"*\". "
+            "Empty string "
             'values must be represented as "".\n'
             f"Available tools:\n{tools_json}\n<|im_end|>\n"
             f"<|im_start|>user\n{user_prompt}\n<|im_end|>\n"
@@ -114,7 +122,7 @@ class ConstrainedEngine:
         self,
         user_prompt: str,
         function_definitions: List[FunctionDefinition],
-        max_tokens: int = 128,
+        max_tokens: int = 256,
     ) -> ToolCall:
         """Generates a valid ToolCall under grammar constraints."""
         grammar = JSONGrammar(function_definitions)
@@ -209,6 +217,46 @@ class ConstrainedEngine:
             token_str = self.vocab.id_to_token.get(
                 next_token_id, self.model.decode([next_token_id])
             )
+            if (
+                token_str == '"'
+                and grammar.state == GrammarState.ARG_VALUE
+                and grammar.current_param_type() == "string"
+                and grammar.in_string_value
+            ):
+                lookahead_logits = self.model.get_logits_from_input_ids(
+                    input_ids + [next_token_id]
+                )
+                content_ids = [
+                    token_id
+                    for token_id in self.vocab.string_token_ids
+                    if '"' not in self.vocab.id_to_token[token_id]
+                ]
+                closing_ids: List[int] = []
+                for closing_text in (",", "}"):
+                    encoded_closing = self.model.encode(
+                        closing_text
+                    ).tolist()[0]
+                    if encoded_closing:
+                        closing_ids.append(encoded_closing[0])
+                best_content = max(
+                    (lookahead_logits[token_id] for token_id in content_ids),
+                    default=float("-inf"),
+                )
+                best_closing = max(
+                    (lookahead_logits[token_id] for token_id in closing_ids),
+                    default=float("-inf"),
+                )
+                if best_content > best_closing:
+                    grammar.feed('\\"')
+                    input_ids.append(next_token_id)
+                    continue
+            if (
+                grammar.state == GrammarState.ARG_VALUE
+                and grammar.current_param_type() == "string"
+                and grammar.in_string_value
+                and grammar.buffer[grammar.state_start_idx:] == '"'
+            ):
+                token_str = token_str.lstrip(" ")
             if (
                 grammar.state == GrammarState.ARG_VALUE
                 and grammar.current_param_type() in ("number", "integer")
