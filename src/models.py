@@ -80,6 +80,9 @@ def validate_tool_call(
 
     for name, definition in function.parameters.items():
         value = tool_call.parameters[name]
+        if definition.type == "number" and isinstance(value, int):
+            tool_call.parameters[name] = float(value)
+            value = tool_call.parameters[name]
         valid_type = (
             isinstance(value, str)
             if definition.type == "string"
